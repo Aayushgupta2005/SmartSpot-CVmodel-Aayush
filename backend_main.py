@@ -6,9 +6,16 @@ import pickle
 import cvzone
 import numpy as np
 import io
-
+from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
-
+# Allow frontend to access backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Use specific domains in production!
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 cap = cv2.VideoCapture("carPark.mp4")
 
 with open('CarParkPos', 'rb') as f:
@@ -59,3 +66,28 @@ def generate_frames():
 @app.get("/video")
 def video_feed():
     return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+@app.get("/counter")
+def get_counter():
+    # Read a single frame to analyze
+    cap.set(cv2.CAP_PROP_POS_FRAMES, cap.get(cv2.CAP_PROP_POS_FRAMES))
+    _, img = cap.read()
+
+    # Preprocessing
+    imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    imgBlur = cv2.GaussianBlur(imgGray, (3, 3), 1)
+    imgThreshold = cv2.adaptiveThreshold(imgBlur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                         cv2.THRESH_BINARY_INV, 25, 16)
+    imgMedian = cv2.medianBlur(imgThreshold, 5)
+    kernel = np.ones((3, 3), np.uint8)
+    imgDilate = cv2.dilate(imgMedian, kernel, iterations=1)
+
+    # Count free spaces
+    free = 0
+    for pos in posList:
+        x, y = pos
+        imgCrop = imgDilate[y:y + height, x:x + width]
+        count = cv2.countNonZero(imgCrop)
+        if count < 900:
+            free += 1
+
+    return {"free": free, "total": len(posList)}
